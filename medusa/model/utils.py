@@ -255,6 +255,90 @@ def get_typical_one_token(logit, temperature, posterior_threshold, posterior_alp
     sampled_tokens = torch.multinomial(F.softmax(logit, dim=-1), 1)
     return sampled_tokens
 
+def sample_candidates(
+    medusa_logits, logits,
+    temperature = 0, posterior_threshold=0.3, posterior_alpha = 0.09, top_p=0.8, sampling = 'typical', fast = False):
+    """ 
+    - temperature (float, optional): Controls the diversity of the sampling process. Defaults to 0.
+    - posterior_threshold (float, optional): Threshold for typical sampling. Defaults to 0.3.
+    - posterior_alpha (float, optional): Scaling factor for the entropy-based threshold in typical sampling. Defaults to 0.09.
+    - top_p (float, optional): Cumulative probability threshold for nucleus sampling. Defaults to 0.8.
+    - sampling (str, optional): Defines the sampling strategy ('typical' or 'nucleus'). Defaults to 'typical'.
+    - fast (bool, optional): If True, enables faster, deterministic decoding for typical sampling. Defaults to False.
+    """
+
+    # Greedy decoding: Select the most probable candidate from the original logits.
+    if temperature == 0 or fast:
+        base_candidate = torch.argmax(logits[:, -1]).unsqueeze(0)
+    else:
+        if sampling == 'typical':
+            base_candidate = get_typical_one_token(logits[:, -1], temperature, posterior_threshold, posterior_alpha).squeeze(0)
+        elif sampling == 'nucleus':
+            base_candidate = get_nucleus_one_token(logits[:, -1], temperature, top_p).squeeze(0)
+        else:
+            raise NotImplementedError
+
+    # Extract the TOPK candidates from the medusa logits.
+    medusa_topk = torch.topk(medusa_logits[:, 0, -1], TOPK, dim = -1) 
+    medusa_candidates_logits, medusa_candidates = medusa_topk.values, medusa_topk.indices
+
+    return medusa_candidates, base_candidate, medusa_candidates_logits
+
+def sample_medusa_choices(medusa_candidates_logits, old_medusa_choices=None, num_choices=64):
+    if old_medusa_choices is not None:
+        return old_medusa_choices
+    num_medusa_heads = medusa_candidates_logits.shape[0]
+    medusa_choices = []
+    choice = []
+    choice_probs = [1.]
+    head = 0 
+
+    while len(medusa_choices) < num_choices:
+        if head < num_medusa_heads and torch.rand(1).item() < choice_probs[-1]:
+            idx = torch.multinomial(medusa_candidates_logits[head], 1).item()
+            choice.append(idx)
+            choice_probs.append(choice_probs[-1] * medusa_candidates_logits[head, idx].item())
+            head += 1
+        elif head > 0:
+            choice.pop()
+            choice_probs.pop()
+            head -= 1
+        medusa_choices.append(choice.copy())
+
+    return medusa_choices
+
+def select_candidates(medusa_candidates, base_candidate, tree_indices, retrieve_indices):
+    """
+    Generate candidates based on provided logits and indices.
+
+    Parameters:
+    - medusa_candidates (torch.Tensor)
+    - base_candidate (torch.Tensor)
+    - tree_indices (list or torch.Tensor): Indices representing a tree structure, used for mapping candidates.
+    - retrieve_indices (list or torch.Tensor): Indices for extracting specific candidate tokens.
+
+    Returns:
+    - tuple (torch.Tensor, torch.Tensor): A tuple containing two sets of candidates:
+        1. Cartesian candidates derived from the combined original and Medusa logits.
+        2. Tree candidates mapped from the Cartesian candidates using tree indices.
+    """
+
+    # Combine the selected candidate from the original logits with the topk medusa logits.
+    candidates = torch.cat([base_candidate, medusa_candidates.view(-1)], dim=-1)
+
+    # Map the combined candidates to the tree indices to get tree candidates.
+    tree_candidates = candidates[tree_indices]
+
+    # Extend the tree candidates by appending a zero.
+    tree_candidates_ext = torch.cat([tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device)], dim=0)
+
+    # Retrieve the cartesian candidates using the retrieve indices.
+    cart_candidates = tree_candidates_ext[retrieve_indices]
+
+    # Unsqueeze the tree candidates for dimension consistency.
+    tree_candidates = tree_candidates.unsqueeze(0)
+    return cart_candidates, tree_candidates
+
 def generate_candidates(medusa_logits, logits, tree_indices, retrieve_indices, temperature = 0, posterior_threshold=0.3, posterior_alpha = 0.09, top_p=0.8, sampling = 'typical', fast = False):
     """
     Generate candidates based on provided logits and indices.
