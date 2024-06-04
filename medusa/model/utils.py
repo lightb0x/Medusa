@@ -288,23 +288,25 @@ def sample_medusa_choices(medusa_candidates_logits, old_medusa_choices=None, num
     if old_medusa_choices is not None:
         return old_medusa_choices
     num_medusa_heads = medusa_candidates_logits.shape[0]
+    medusa_candidates_prob = F.softmax(medusa_candidates_logits, dim=-1)
     medusa_choices = []
+    
     choice = []
     choice_probs = [1.]
     head = 0 
 
     while len(medusa_choices) < num_choices:
         if head < num_medusa_heads and torch.rand(1).item() < choice_probs[-1]:
-            idx = torch.multinomial(medusa_candidates_logits[head], 1).item()
+            idx = torch.multinomial(medusa_candidates_prob[head], 1).item()
             choice.append(idx)
-            choice_probs.append(choice_probs[-1] * medusa_candidates_logits[head, idx].item())
+            choice_probs.append(choice_probs[-1] * medusa_candidates_prob[head, idx].item())
             head += 1
         elif head > 0:
             choice.pop()
             choice_probs.pop()
             head -= 1
-        medusa_choices.append(choice.copy())
-
+        if len(choice) > 0 and not choice in medusa_choices:
+            medusa_choices.append(choice.copy())
     return medusa_choices
 
 def select_candidates(medusa_candidates, base_candidate, tree_indices, retrieve_indices):
