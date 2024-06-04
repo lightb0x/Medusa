@@ -284,29 +284,36 @@ def sample_candidates(
 
     return medusa_candidates, base_candidate, medusa_candidates_logits
 
-def sample_medusa_choices(medusa_candidates_logits, old_medusa_choices=None, num_choices=64):
+def sample_medusa_choices(medusa_candidates_logits, old_medusa_choices=None, num_choices=64, sampling='dfs'):
     if old_medusa_choices is not None:
         return old_medusa_choices
     num_medusa_heads = medusa_candidates_logits.shape[0]
     medusa_candidates_prob = F.softmax(medusa_candidates_logits, dim=-1)
     medusa_choices = []
     
-    choice = []
-    choice_probs = [1.]
-    head = 0 
+    if sampling == 'dfs':
+        choice = []
+        choice_probs = [1.]
+        head = 0 
 
-    while len(medusa_choices) < num_choices:
-        if head < num_medusa_heads and torch.rand(1).item() < choice_probs[-1]:
-            idx = torch.multinomial(medusa_candidates_prob[head], 1).item()
-            choice.append(idx)
-            choice_probs.append(choice_probs[-1] * medusa_candidates_prob[head, idx].item())
-            head += 1
-        elif head > 0:
-            choice.pop()
-            choice_probs.pop()
-            head -= 1
-        if len(choice) > 0 and not choice in medusa_choices:
-            medusa_choices.append(choice.copy())
+        while len(medusa_choices) < num_choices:
+            if head < num_medusa_heads and torch.rand(1).item() < choice_probs[-1]:
+                idx = torch.multinomial(medusa_candidates_prob[head], 1).item()
+                choice.append(idx)
+                choice_probs.append(choice_probs[-1] * medusa_candidates_prob[head, idx].item())
+                head += 1
+            elif head > 0:
+                choice.pop()
+                choice_probs.pop()
+                head -= 1
+            if len(choice) > 0 and not choice in medusa_choices:
+                medusa_choices.append(choice.copy())
+    elif sampling == 'bfs':
+        raise NotImplementedError
+    elif sampling == 'mcmc':
+        raise NotImplementedError
+    else:
+        raise ValueError(sampling)
     return medusa_choices
 
 def select_candidates(medusa_candidates, base_candidate, tree_indices, retrieve_indices):
