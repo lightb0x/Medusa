@@ -96,7 +96,7 @@ def medusa_forward(input_ids, model, tokenizer, medusa_choices, temperature, pos
                 fast=False,
             )
             # Sample medusa choices
-            medusa_choices = medusa_choices = sample_medusa_choices(
+            medusa_choices = sample_medusa_choices(
                 medusa_candidates_logits
             )
 
