@@ -294,7 +294,7 @@ def sample_medusa_choices(medusa_candidates_logits, old_medusa_choices=None, num
     if sampling == 'dfs':
         choice = []
         choice_probs = [1.]
-        head = 0 
+        head = 0
 
         while len(medusa_choices) < num_choices:
             if head < num_medusa_heads and torch.rand(1).item() < choice_probs[-1]:
@@ -309,7 +309,31 @@ def sample_medusa_choices(medusa_candidates_logits, old_medusa_choices=None, num
             if len(choice) > 0 and not choice in medusa_choices:
                 medusa_choices.append(choice.copy())
     elif sampling == 'bfs':
-        raise NotImplementedError
+        import queue
+        buffer = queue.Queue()
+        buffer_prob = queue.Queue()
+
+        while len(medusa_choices) < num_choices:
+            # base case
+            if buffer.empty():
+                for i, prob in enumerate(medusa_candidates_prob[0]):
+                    buffer.put([i])
+                    buffer_prob.put(prob.item() * num_choices)
+
+            # dequeue
+            path = buffer.get(block=False)
+            path_prob = buffer_prob.get(block=False)
+
+            threshold = torch.rand(1).item()
+            if threshold < path_prob and not path in medusa_choices:
+                medusa_choices.append(path)
+
+                # enqueue
+                if len(path) < num_medusa_heads:
+                    for i, prob in enumerate(medusa_candidates_prob[len(path)]):
+                        buffer.put(path + [i])
+                        buffer_prob.put(path_prob * prob.item())
+        medusa_choices = medusa_choices[:num_choices]
     elif sampling == 'mcmc':
         raise NotImplementedError
     else:
